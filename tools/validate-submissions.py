@@ -130,11 +130,14 @@ def fetch_with_kmp_torrentd(executable, torrent_path, destination, timeout):
                 time.sleep(.25)
         encoded = base64.b64encode(torrent_path.read_bytes()).decode()
         gid = rpc(endpoint, secret, "aria2.addTorrent", [encoded, [], {"dir": str(destination)}])
+        name, length = torrent_package_metadata(torrent_path)
+        package = destination / name
         last_report = 0
         while True:
             status = rpc(endpoint, secret, "aria2.tellStatus", [gid])
             total, completed = int(status["totalLength"]), int(status["completedLength"])
-            if total > 0 and completed >= total: return
+            # O anacrolix grava em "<nome>.part" e só renomeia depois de concluir a última peça.
+            if total > 0 and completed >= total and package.is_file() and package.stat().st_size == length: return
             elapsed = time.monotonic() - started
             if elapsed - last_report >= 15:
                 network = rpc(endpoint, secret, "kmp.getNetworkStats")
