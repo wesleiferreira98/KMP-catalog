@@ -6,11 +6,16 @@ from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
+import re
 import shutil
 from urllib.parse import quote
 
 TRACKERS = ["udp://tracker.opentrackr.org:1337/announce", "udp://open.stealth.si:80/announce"]
 PIECE_LENGTH = 256 * 1024
+# Pacotes acima do limite do Git não vão para docs/packages; o Publisher os semeia
+# por HTTP com um asset de Release no fork do catálogo.
+RELEASE_WEBSEED = re.compile(r"^https://github\.com/[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/KMP-catalog/"
+    r"releases/download/[^/?#\s]+/[^/?#\s]+$")
 
 
 def decode(data, offset=0):
@@ -146,7 +151,11 @@ def main():
             torrent_payload = matches[0].read_bytes()
             torrent_document, torrent_end = decode(torrent_payload)
             if torrent_end != len(torrent_payload): raise ValueError(f"torrent inválido: {matches[0]}")
-            if not package_is_hosted: torrent_document.pop(b"url-list", None)
+            if not package_is_hosted:
+                webseeds = torrent_document.pop(b"url-list", [])
+                if isinstance(webseeds, bytes): webseeds = [webseeds]
+                webseeds = [item for item in webseeds if RELEASE_WEBSEED.match(text(item))]
+                if webseeds: torrent_document[b"url-list"] = webseeds
             matches[0].write_bytes(encode(torrent_document))
             info_hash, magnet, encoded_torrent = torrent_metadata(matches[0])
             if package_is_hosted:

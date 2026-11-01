@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 import socket
 import subprocess
@@ -21,6 +22,11 @@ FALLBACK_TRACKERS = [
     "http://tracker.renfei.net:8080/announce",
     "https://tracker.bug38.com:443/announce",
 ]
+# Webseeds aceitos: o próprio catálogo e assets de Release em forks do catálogo,
+# que o Publisher usa como semente inicial de pacotes maiores que o limite do Git.
+ALLOWED_WEBSEED = re.compile(r"^https://(?:ferreiratechlab\.github\.io/KMP-catalog/packages/|"
+    r"raw\.githubusercontent\.com/FerreiraTechLab/KMP-catalog/main/docs/packages/|"
+    r"github\.com/[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/KMP-catalog/releases/download/[^/?#\s]+/)[^/?#\s]+$")
 
 def decode(data, offset=0):
     marker = data[offset:offset + 1]
@@ -38,6 +44,35 @@ def decode(data, offset=0):
         return values, offset + 1
     colon = data.index(b":", offset); length = int(data[offset:colon]); start = colon + 1
     return data[start:start + length], start + length
+
+def encode(value):
+    if isinstance(value, int): return b"i" + str(value).encode() + b"e"
+    if isinstance(value, bytes): return str(len(value)).encode() + b":" + value
+    if isinstance(value, list): return b"l" + b"".join(encode(item) for item in value) + b"e"
+    if isinstance(value, dict):
+        return b"d" + b"".join(encode(key) + encode(value[key]) for key in sorted(value)) + b"e"
+    raise TypeError(type(value))
+
+def prepare_torrent(torrent_path, destination):
+    """Copia o torrent mantendo o infohash, só com webseeds confiáveis e trackers HTTP extras."""
+    payload = torrent_path.read_bytes()
+    document, end = decode(payload)
+    if end != len(payload) or b"info" not in document: raise ValueError("torrent inválido")
+    if encode(document[b"info"]) not in payload: raise ValueError("torrent com bloco info não canônico")
+    webseeds = document.get(b"url-list", [])
+    if isinstance(webseeds, bytes): webseeds = [webseeds]
+    accepted = [item for item in webseeds if ALLOWED_WEBSEED.match(item.decode("utf-8", "replace"))]
+    for item in webseeds:
+        if item not in accepted: print(f"webseed ignorado: {item.decode('utf-8', 'replace')}", flush=True)
+    if accepted: document[b"url-list"] = accepted
+    else: document.pop(b"url-list", None)
+    tiers = document.get(b"announce-list", [])
+    known = {tracker for tier in tiers for tracker in tier}
+    document[b"announce-list"] = tiers + [[tracker.encode()] for tracker in FALLBACK_TRACKERS
+        if tracker.encode() not in known]
+    prepared = destination / f".{torrent_path.name}"
+    prepared.write_bytes(encode(document))
+    return prepared
 
 def verify_torrent(torrent_path, package_path, size):
     payload = torrent_path.read_bytes()
@@ -116,6 +151,7 @@ def fetch_with_kmp_torrentd(executable, torrent_path, destination, timeout):
 
 def fetch_package(torrent_path, destination, timeout):
     destination.mkdir(parents=True, exist_ok=True)
+    torrent_path = prepare_torrent(torrent_path, destination)
     kmp_torrentd = os.environ.get("KMP_TORRENTD")
     if kmp_torrentd:
         fetch_with_kmp_torrentd(kmp_torrentd, torrent_path, destination, timeout)
