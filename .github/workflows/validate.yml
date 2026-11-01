@@ -12,18 +12,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - name: Check out KMP torrent backend
-        uses: actions/checkout@v4
-        with:
-          repository: FerreiraTechLab/KMP
-          ref: 342ecfa45a16a5df914a972131cc803f3358c4e5
-          path: .kmp-source
       - uses: actions/setup-go@v5
         with:
           go-version: "1.24.x"
-          cache-dependency-path: .kmp-source/torrentd/go.sum
+          cache-dependency-path: tools/kmp-torrentd/go.sum
       - name: Build KMP torrent backend
-        run: cd .kmp-source/torrentd && go build -o "$RUNNER_TEMP/kmp-torrentd" ./cmd/kmp-torrentd
+        run: cd tools/kmp-torrentd && go build -o "$RUNNER_TEMP/kmp-torrentd" ./cmd/kmp-torrentd
       - run: pip install check-jsonschema==0.33.3
       - name: Validate each snapshot with its declared schema
         run: |

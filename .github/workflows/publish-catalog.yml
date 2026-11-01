@@ -21,21 +21,14 @@ jobs:
     environment: catalog-production
     steps:
       - uses: actions/checkout@v4
-      - name: Check out KMP torrent backend
-        if: github.event_name == 'push' || inputs.sequence == ''
-        uses: actions/checkout@v4
-        with:
-          repository: FerreiraTechLab/KMP
-          ref: 342ecfa45a16a5df914a972131cc803f3358c4e5
-          path: .kmp-source
       - uses: actions/setup-go@v5
         if: github.event_name == 'push' || inputs.sequence == ''
         with:
           go-version: "1.24.x"
-          cache-dependency-path: .kmp-source/torrentd/go.sum
+          cache-dependency-path: tools/kmp-torrentd/go.sum
       - name: Build KMP torrent backend
         if: github.event_name == 'push' || inputs.sequence == ''
-        run: cd .kmp-source/torrentd && go build -o "$RUNNER_TEMP/kmp-torrentd" ./cmd/kmp-torrentd
+        run: cd tools/kmp-torrentd && go build -o "$RUNNER_TEMP/kmp-torrentd" ./cmd/kmp-torrentd
       - name: Revalidate package bytes from the swarm
         if: github.event_name == 'push' || inputs.sequence == ''
         env:
