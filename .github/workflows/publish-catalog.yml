@@ -21,6 +21,17 @@ jobs:
     environment: catalog-production
     steps:
       - uses: actions/checkout@v4
+      - name: Install BitTorrent validation backend
+        if: github.event_name == 'push' || inputs.sequence == ''
+        run: sudo apt-get update && sudo apt-get install -y aria2
+      - name: Revalidate package bytes from the swarm
+        if: github.event_name == 'push' || inputs.sequence == ''
+        run: |
+          shopt -s nullglob globstar
+          submissions=(submissions/**/submission.json)
+          if ((${#submissions[@]})); then
+            python3 tools/validate-submissions.py --fetch-missing --download-timeout 900 "${submissions[@]}"
+          fi
       - name: Promote merged submissions
         id: promote
         if: github.event_name == 'push' || inputs.sequence == ''

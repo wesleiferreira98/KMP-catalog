@@ -12,6 +12,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+      - name: Install BitTorrent validation backend
+        run: sudo apt-get update && sudo apt-get install -y aria2
       - run: pip install check-jsonschema==0.33.3
       - name: Validate each snapshot with its declared schema
         run: |
@@ -26,5 +28,5 @@ jobs:
           submissions=(submissions/**/submission.json)
           if ((${#submissions[@]})); then
             check-jsonschema --schemafile schemas/publisher-submission-v1.schema.json "${submissions[@]}"
-            python3 tools/validate-submissions.py "${submissions[@]}"
+            python3 tools/validate-submissions.py --fetch-missing --download-timeout 900 "${submissions[@]}"
           fi

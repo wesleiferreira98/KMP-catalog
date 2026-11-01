@@ -128,22 +128,32 @@ def main():
         release = submission["release"]
         variants = []
         for variant in release["variants"]:
-            package_source = base / variant["package"]["path"]
+            package_name = Path(variant["package"]["path"]).name
             torrents = list((base / "torrents").glob("*.torrent"))
             matches = []
             for candidate in torrents:
                 try:
                     document, _ = decode(candidate.read_bytes())
-                    if text(document[b"info"][b"name"]) == package_source.name: matches.append(candidate)
+                    info = document[b"info"]
+                    if (text(info[b"name"]) == package_name and
+                            info.get(b"length") == variant["package"]["sizeBytes"]):
+                        matches.append(candidate)
                 except (ValueError, KeyError, UnicodeDecodeError): pass
-            if len(matches) != 1: raise ValueError(f"torrent correspondente não encontrado para {package_source}")
-            package_target = root / "docs/packages" / package_source.name
+            if len(matches) != 1: raise ValueError(f"torrent correspondente não encontrado para {package_name}")
+            package_source = (base / variant["package"]["path"]).resolve()
+            package_is_hosted = package_source.is_file()
             torrent_target = root / "docs/packages" / matches[0].name
+            torrent_payload = matches[0].read_bytes()
+            torrent_document, torrent_end = decode(torrent_payload)
+            if torrent_end != len(torrent_payload): raise ValueError(f"torrent inválido: {matches[0]}")
+            if not package_is_hosted: torrent_document.pop(b"url-list", None)
+            matches[0].write_bytes(encode(torrent_document))
             info_hash, magnet, encoded_torrent = torrent_metadata(matches[0])
-            copy_or_verify(package_source, package_target)
+            if package_is_hosted:
+                copy_or_verify(package_source, root / "docs/packages" / package_name)
             copy_or_verify(matches[0], torrent_target)
             variants.append({key: value for key, value in variant.items() if key not in ("package", "checks")} | {
-                "download": {"packageFile": package_target.name, "sizeBytes": variant["package"]["sizeBytes"],
+                "download": {"packageFile": package_name, "sizeBytes": variant["package"]["sizeBytes"],
                     "sha256": variant["package"]["sha256"], "infoHash": info_hash,
                     "magnet": magnet, "torrent": encoded_torrent}})
         checks = ["manual-run" if check == "local-run" else check for check in release["variants"][0]["checks"]]
