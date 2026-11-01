@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
 """Validate proposal artifacts without trusting Publisher metadata."""
 import argparse
+import base64
 import hashlib
 import json
+import os
 from pathlib import Path
+import secrets
+import socket
 import subprocess
 import sys
 import tempfile
+import time
+import urllib.request
 
 FALLBACK_TRACKERS = [
     "http://tracker.opentrackr.org:1337/announce",
@@ -53,8 +59,67 @@ def torrent_package_metadata(torrent_path):
     if b"files" in info: raise ValueError("torrent com múltiplos arquivos não é aceito")
     return info[b"name"].decode(), info[b"length"]
 
+def available_port():
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        return listener.getsockname()[1]
+
+def rpc(endpoint, secret, method, params=None):
+    payload = json.dumps({"jsonrpc": "2.0", "id": "catalog-validator", "method": method,
+        "params": [f"token:{secret}", *(params or [])]}).encode()
+    request = urllib.request.Request(endpoint, data=payload, headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(request, timeout=10) as response:
+        body = json.load(response)
+    if body.get("error"): raise ValueError(f"kmp-torrentd: {body['error'].get('message', 'erro RPC')}")
+    return body.get("result")
+
+def fetch_with_kmp_torrentd(executable, torrent_path, destination, timeout):
+    rpc_port, listen_port = available_port(), available_port()
+    while listen_port == rpc_port: listen_port = available_port()
+    secret = secrets.token_hex(24)
+    state = destination / ".kmp-torrentd"
+    command = [executable, f"--rpc-listen=127.0.0.1:{rpc_port}", f"--rpc-secret={secret}",
+        f"--state-dir={state}", f"--data-dir={destination}", f"--listen-port={listen_port}",
+        "--upload-limit=0", "--download-limit=0"]
+    process = subprocess.Popen(command)
+    endpoint = f"http://127.0.0.1:{rpc_port}/jsonrpc"
+    started = time.monotonic()
+    try:
+        while True:
+            try:
+                rpc(endpoint, secret, "aria2.getVersion")
+                break
+            except (OSError, ValueError):
+                if process.poll() is not None: raise ValueError(f"kmp-torrentd encerrou com código {process.returncode}")
+                if time.monotonic() - started > 15: raise ValueError("kmp-torrentd não iniciou a API RPC")
+                time.sleep(.25)
+        encoded = base64.b64encode(torrent_path.read_bytes()).decode()
+        gid = rpc(endpoint, secret, "aria2.addTorrent", [encoded, [], {"dir": str(destination)}])
+        last_report = 0
+        while True:
+            status = rpc(endpoint, secret, "aria2.tellStatus", [gid])
+            total, completed = int(status["totalLength"]), int(status["completedLength"])
+            if total > 0 and completed >= total: return
+            elapsed = time.monotonic() - started
+            if elapsed - last_report >= 15:
+                network = rpc(endpoint, secret, "kmp.getNetworkStats")
+                print(f"kmp-torrentd: {completed}/{total} bytes; {status['connections']} conexões; rede={network}", flush=True)
+                last_report = elapsed
+            if elapsed >= timeout: raise ValueError(f"tempo esgotado ao obter pacote pelo swarm ({timeout}s)")
+            if process.poll() is not None: raise ValueError(f"kmp-torrentd encerrou com código {process.returncode}")
+            time.sleep(2)
+    finally:
+        try: rpc(endpoint, secret, "aria2.shutdown")
+        except Exception: process.terminate()
+        try: process.wait(timeout=10)
+        except subprocess.TimeoutExpired: process.kill()
+
 def fetch_package(torrent_path, destination, timeout):
     destination.mkdir(parents=True, exist_ok=True)
+    kmp_torrentd = os.environ.get("KMP_TORRENTD")
+    if kmp_torrentd:
+        fetch_with_kmp_torrentd(kmp_torrentd, torrent_path, destination, timeout)
+        return
     command = ["aria2c", "--seed-time=0", "--check-integrity=true", "--file-allocation=none",
         f"--bt-tracker={','.join(FALLBACK_TRACKERS)}",
         "--allow-overwrite=true", "--auto-file-renaming=false", f"--dir={destination}", str(torrent_path.resolve())]
