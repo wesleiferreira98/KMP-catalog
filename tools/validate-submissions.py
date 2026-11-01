@@ -8,6 +8,14 @@ import subprocess
 import sys
 import tempfile
 
+FALLBACK_TRACKERS = [
+    "http://tracker.opentrackr.org:1337/announce",
+    "https://tracker.opentrackr.org:443/announce",
+    "http://tracker.dler.org:6969/announce",
+    "http://tracker.renfei.net:8080/announce",
+    "https://tracker.bug38.com:443/announce",
+]
+
 def decode(data, offset=0):
     marker = data[offset:offset + 1]
     if marker == b"i":
@@ -48,6 +56,7 @@ def torrent_package_metadata(torrent_path):
 def fetch_package(torrent_path, destination, timeout):
     destination.mkdir(parents=True, exist_ok=True)
     command = ["aria2c", "--seed-time=0", "--check-integrity=true", "--file-allocation=none",
+        f"--bt-tracker={','.join(FALLBACK_TRACKERS)}",
         "--allow-overwrite=true", "--auto-file-renaming=false", f"--dir={destination}", str(torrent_path.resolve())]
     try:
         subprocess.run(command, check=True, timeout=timeout)
