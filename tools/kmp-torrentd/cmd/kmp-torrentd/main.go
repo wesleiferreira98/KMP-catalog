@@ -28,7 +28,7 @@ import (
 	"golang.org/x/time/rate"
 )
 
-const version = "0.2.2"
+const version = "0.2.3"
 
 type rpcRequest struct {
 	JSONRPC string            `json:"jsonrpc"`
@@ -368,11 +368,12 @@ func (d *daemon) status(gid string) (map[string]any, error) {
 func (d *daemon) statusOf(x *transfer) map[string]any {
 	t := x.Torrent
 	total, done := t.Length(), t.BytesCompleted()
+	finished := total > 0 && done >= total && filesInPlace(x)
 	st := t.Stats()
 	status := "active"
 	if x.Paused {
 		status = "paused"
-	} else if total > 0 && done >= total {
+	} else if finished {
 		status = "complete"
 	}
 	x.mu.Lock()
@@ -390,9 +391,24 @@ func (d *daemon) statusOf(x *transfer) map[string]any {
 		"completedLength": strconv.FormatInt(done, 10), "downloadSpeed": strconv.FormatInt(downRate, 10),
 		"downloadLength": strconv.FormatInt(st.BytesReadUsefulData.Int64(), 10),
 		"uploadSpeed": strconv.FormatInt(upRate, 10), "uploadLength": strconv.FormatInt(st.BytesWrittenData.Int64(), 10),
-		"infoHash": strings.ToLower(t.InfoHash().HexString()), "seeder": strconv.FormatBool(total > 0 && done >= total),
+		"infoHash": strings.ToLower(t.InfoHash().HexString()), "seeder": strconv.FormatBool(finished),
 		"numSeeders": strconv.Itoa(st.ConnectedSeeders), "connections": strconv.Itoa(st.ActivePeers), "files": files,
 	}
+}
+
+// A storage de arquivos grava em "<nome>.part" e só renomeia depois de verificar a
+// última peça, então BytesCompleted pode atingir o total antes de o arquivo final existir.
+func filesInPlace(x *transfer) bool {
+	if x.Torrent.Info() == nil {
+		return false
+	}
+	for _, f := range x.Torrent.Files() {
+		stat, err := os.Stat(filepath.Join(x.Dir, filepath.FromSlash(f.Path())))
+		if err != nil || !stat.Mode().IsRegular() || stat.Size() != f.Length() {
+			return false
+		}
+	}
+	return true
 }
 
 func (d *daemon) list(kind string) []map[string]any {

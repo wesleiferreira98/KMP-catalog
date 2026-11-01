@@ -85,6 +85,43 @@ func newTestClient(t *testing.T, dir string) *torrent.Client {
 	return client
 }
 
+func TestCompletionWaitsForPartFilePromotion(t *testing.T) {
+	dir := t.TempDir()
+	payload := bytes.Repeat([]byte("KMP part file\n"), 1024)
+	source := filepath.Join(t.TempDir(), "package.zip")
+	if err := os.WriteFile(source, payload, 0644); err != nil {
+		t.Fatal(err)
+	}
+	info := metainfo.Info{PieceLength: 16 * 1024}
+	if err := info.BuildFromFilePath(source); err != nil {
+		t.Fatal(err)
+	}
+	infoBytes, err := bencode.Marshal(info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := newTestClient(t, dir)
+	defer client.Close()
+	added, err := client.AddTorrent(&metainfo.MetaInfo{InfoBytes: infoBytes})
+	if err != nil {
+		t.Fatal(err)
+	}
+	x := &transfer{Dir: dir, Torrent: added}
+	partial := filepath.Join(dir, "package.zip.part")
+	if err := os.WriteFile(partial, payload, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if filesInPlace(x) {
+		t.Fatal("arquivo .part tratado como concluído")
+	}
+	if err := os.Rename(partial, filepath.Join(dir, "package.zip")); err != nil {
+		t.Fatal(err)
+	}
+	if !filesInPlace(x) {
+		t.Fatal("arquivo final com tamanho correto não reconhecido")
+	}
+}
+
 func TestTransferBetweenTwoDaemons(t *testing.T) {
 	root := t.TempDir()
 	seedDir, downloadDir := filepath.Join(root, "seed"), filepath.Join(root, "download")
@@ -153,6 +190,14 @@ func TestTransferBetweenTwoDaemons(t *testing.T) {
 			t.Fatalf("diretório RPC = %v; esperado %s", status["dir"], downloadDir)
 		}
 		if status["completedLength"] == status["totalLength"] && status["totalLength"] != "0" {
+			if _, err := os.Stat(filepath.Join(downloadDir, "package.zip.part")); err == nil && status["status"] == "complete" {
+				t.Fatal("status complete enquanto o arquivo ainda é .part")
+			}
+		}
+		if status["status"] == "complete" {
+			if status["seeder"] != "true" {
+				t.Fatalf("complete sem seeder: %#v", status)
+			}
 			break
 		}
 		select {
