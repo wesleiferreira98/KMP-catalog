@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "project": {
+    "id": "nfsu1",
+    "name": "Need For Speed Underground",
+    "description": "O Need for Speed: Underground é um clássico jogo eletrônico de corrida de 2003 desenvolvido pela EA Black Box e publicado pela Electronic Arts",
+    "homepage": "https://ferreiratechlaboficial.web.app/",
+    "source": "https://ferreiratechlaboficial.web.app/",
+    "license": "MIT",
+    "porter": {
+      "name": "FerreiraTechLab",
+      "url": "https://ferreiratechlaboficial.web.app/"
+    },
+    "redistribution": {
+      "allowed": true,
+      "evidence": "https://ferreiratechlaboficial.web.app/licence"
+    }
+  },
+  "submitter": {
+    "name": "FerreiraTechLab",
+    "url": "https://ferreiratechlaboficial.web.app/"
+  },
+  "release": {
+    "version": "1.0.1",
+    "revision": 2,
+    "channel": "stable",
+    "publishedAt": "2026-11-01T19:23:29.588Z",
+    "notes": "priemeira versão ",
+    "variants": [
+      {
+        "id": "aarch64-portmaster",
+        "priority": 100,
+        "requiredCapabilities": [],
+        "compatibility": {
+          "architectures": [
+            "aarch64"
+          ],
+          "firmwares": {
+            "include": [
+              "darkos",
+              "rocknix",
+              "aurknix"
+            ]
+          }
+        },
+        "requirements": {
+          "readyToRun": true,
+          "minimumRamMB": 128,
+          "analogSticks": 0,
+          "renderers": [],
+          "runtimes": []
+        },
+        "package": {
+          "path": "packages/nfsu1.zip",
+          "sizeBytes": 521272051,
+          "sha256": "9bfa48d507704cd38625b1bdf7a7b0b54f1f6a9f873fa2e3d4a953ba807360e7"
+        },
+        "install": {
+          "portId": "nfsu1",
+          "paths": [
+            "Need For Speed Underground.sh",
+            "nfsu1/"
+          ],
+          "userDataPaths": []
+        },
+        "checks": [
+          "hash",
+          "zip-layout",
+          "launcher",
+          "license"
+        ]
+      }
+    ]
+  }
+}
