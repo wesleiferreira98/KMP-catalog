@@ -16,6 +16,21 @@ PIECE_LENGTH = 256 * 1024
 # por HTTP com um asset de Release no fork do catálogo.
 RELEASE_WEBSEED = re.compile(r"^https://github\.com/[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/KMP-catalog/"
     r"releases/download/[^/?#\s]+/[^/?#\s]+$")
+# Nós públicos sempre alcançáveis: os clientes os adicionam aos magnets (x.pe) para ter
+# um peer e uma ponte de hole punching mesmo quando trackers e DHT demoram.
+SEED_NODES_EXTENSION = "kmp.seed-nodes"
+SEED_NODE = re.compile(r"^(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)"
+    r":(?:6553[0-5]|655[0-2]\d|65[0-4]\d\d|6[0-4]\d{3}|[1-5]\d{4}|[1-9]\d{0,3})$")
+
+
+def seed_nodes(root):
+    path = root / "seed-nodes.json"
+    if not path.exists(): return []
+    nodes = json.loads(path.read_text())
+    if (not isinstance(nodes, list) or len(nodes) > 16 or len(set(nodes)) != len(nodes) or
+            not all(isinstance(node, str) and SEED_NODE.match(node) for node in nodes)):
+        raise ValueError("seed-nodes.json deve listar até 16 endereços IPv4:porta distintos")
+    return nodes
 
 
 def decode(data, offset=0):
@@ -120,9 +135,16 @@ def main():
         release = submission["release"]
         identity = (submission["project"]["id"], release["version"], release["revision"])
         if identity not in already_published: pending.append((submission_path, submission))
-    if not pending:
+    nodes = seed_nodes(root)
+    extensions = dict(catalog.get("extensions") or {})
+    nodes_changed = extensions.get(SEED_NODES_EXTENSION, []) != nodes
+    if not pending and not nodes_changed:
         print("sequence=", file=args.output.open("a") if args.output else __import__("sys").stdout)
         return
+    if nodes: extensions[SEED_NODES_EXTENSION] = nodes
+    else: extensions.pop(SEED_NODES_EXTENSION, None)
+    if extensions: catalog["extensions"] = extensions
+    else: catalog.pop("extensions", None)
 
     sequence = catalog["sequence"] + 1
     now = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")

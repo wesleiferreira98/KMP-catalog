@@ -22,6 +22,9 @@ MAX_PUBLIC_KEY_BYTES = 4096
 HEX64 = set("0123456789abcdef")
 SAFE_ID = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 INFO_HASH = re.compile(r"^[0-9a-fA-F]{40}$")
+EXTENSION_NAME = re.compile(r"^[a-z0-9]+(?:[.-][a-z0-9-]+)+$")
+SEED_NODE = re.compile(r"^(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)"
+                       r":(?:6553[0-5]|655[0-2]\d|65[0-4]\d\d|6[0-4]\d{3}|[1-5]\d{4}|[1-9]\d{0,3})$")
 
 
 class VerificationError(ValueError):
@@ -159,6 +162,15 @@ def _validate_v3_catalog(document: dict, sequence: int) -> None:
     if not isinstance(document.get("generatedAt"), str):
         raise VerificationError("generatedAt do catálogo inválido")
     parse_time(document["generatedAt"], "generatedAt")
+    extensions = document.get("extensions", {})
+    if not isinstance(extensions, dict) or not all(
+            isinstance(name, str) and EXTENSION_NAME.fullmatch(name) for name in extensions):
+        raise VerificationError("extensões do catálogo inválidas")
+    seed_nodes = extensions.get("kmp.seed-nodes", [])
+    if (not isinstance(seed_nodes, list) or len(seed_nodes) > 16 or
+            not all(isinstance(node, str) and SEED_NODE.fullmatch(node) for node in seed_nodes) or
+            len(set(seed_nodes)) != len(seed_nodes)):
+        raise VerificationError("nós públicos do catálogo inválidos")
     items, revocations = document.get("items"), document.get("revocations")
     if not isinstance(items, list) or not isinstance(revocations, list):
         raise VerificationError("itens ou revogações do catálogo inválidos")

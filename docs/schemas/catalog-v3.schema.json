@@ -11,7 +11,7 @@
     "generatedAt": {"type": "string", "format": "date-time"},
     "items": {"type": "array", "items": {"$ref": "#/$defs/item"}},
     "revocations": {"type": "array", "items": {"$ref": "#/$defs/revocation"}},
-    "extensions": {"$ref": "#/$defs/extensions"}
+    "extensions": {"$ref": "#/$defs/catalogExtensions"}
   },
   "$defs": {
     "safeId": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"},
@@ -177,6 +177,16 @@
     "extensions": {
       "type": "object",
       "propertyNames": {"pattern": "^[a-z0-9]+(?:[.-][a-z0-9-]+)+$"}
+    },
+    "catalogExtensions": {
+      "allOf": [{"$ref": "#/$defs/extensions"}],
+      "properties": {
+        "kmp.seed-nodes": {
+          "description": "Nós públicos sempre alcançáveis (IPv4:porta) que os clientes adicionam aos magnets",
+          "type": "array", "maxItems": 16, "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9]):(?:6553[0-5]|655[0-2][0-9]|65[0-4][0-9][0-9]|6[0-4][0-9]{3}|[1-5][0-9]{4}|[1-9][0-9]{0,3})$"}
+        }
+      }
     }
   }
 }
