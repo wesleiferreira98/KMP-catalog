@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "project": {
+    "id": "nfsu2",
+    "name": "Need for Speed Underground 2",
+    "description": "Need For Speed: Underground 2 é um jogo eletrônico de corrida de 2004 desenvolvido pela EA Black Box e publicado pela Electronic Arts.",
+    "homepage": "https://ferreiratechlaboficial.web.app/",
+    "source": "https://ferreiratechlaboficial.web.app/",
+    "license": "MIT",
+    "porter": {
+      "name": "Ferreiratechlab",
+      "url": "https://ferreiratechlaboficial.web.app/"
+    },
+    "redistribution": {
+      "allowed": true,
+      "evidence": "https://ferreiratechlaboficial.web.app/licence"
+    }
+  },
+  "submitter": {
+    "name": "Ferreiratechlab",
+    "url": "https://ferreiratechlaboficial.web.app/"
+  },
+  "release": {
+    "version": "1.0.0",
+    "revision": 1,
+    "channel": "stable",
+    "publishedAt": "2026-11-01T23:43:37.600Z",
+    "notes": "",
+    "variants": [
+      {
+        "id": "aarch64-portmaster",
+        "priority": 100,
+        "requiredCapabilities": [],
+        "compatibility": {
+          "architectures": [
+            "aarch64"
+          ],
+          "firmwares": {
+            "include": [
+              "darkos",
+              "rocknix",
+              "aurknix"
+            ]
+          }
+        },
+        "requirements": {
+          "readyToRun": true,
+          "minimumRamMB": 128,
+          "analogSticks": 0,
+          "renderers": [],
+          "runtimes": []
+        },
+        "package": {
+          "path": "packages/nfsu2.zip",
+          "sizeBytes": 1388761094,
+          "sha256": "dad8ea728ed127d2c251847d7d580846fc641c95beb829f80ee3c524acf0537b"
+        },
+        "install": {
+          "portId": "nfsu2",
+          "paths": [
+            "nfsu2/",
+            "NFSU2.sh"
+          ],
+          "userDataPaths": []
+        },
+        "checks": [
+          "hash",
+          "zip-layout",
+          "launcher",
+          "license"
+        ]
+      }
+    ]
+  }
+}
