@@ -19,6 +19,9 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    # Pacotes grandes chegam pelo upload doméstico do publicador; o validador falha
+    # antes disso se o download ficar 30 minutos sem receber bytes.
+    timeout-minutes: 200
     environment: catalog-production
     steps:
       - uses: actions/checkout@v4
@@ -38,7 +41,7 @@ jobs:
           shopt -s nullglob globstar
           submissions=(submissions/**/submission.json)
           if ((${#submissions[@]})); then
-            python3 tools/validate-submissions.py --fetch-missing --download-timeout 900 "${submissions[@]}"
+            python3 tools/validate-submissions.py --fetch-missing --download-timeout 10800 --stall-timeout 1800 "${submissions[@]}"
           fi
       - name: Promote merged submissions
         id: promote

@@ -28,7 +28,7 @@ import (
 	"golang.org/x/time/rate"
 )
 
-const version = "0.2.3"
+const version = "0.2.4"
 
 type rpcRequest struct {
 	JSONRPC string            `json:"jsonrpc"`
@@ -272,9 +272,19 @@ func (d *daemon) call(method string, p []json.RawMessage) (any, error) {
 	case "aria2.getGlobalStat":
 		return d.globalStat(), nil
 	case "aria2.getVersion":
-		return map[string]any{"version": "kmp-torrentd " + version, "enabledFeatures": []string{"BitTorrent", "DHT", "IPv6", "PEX", "uTP", "BEP55"}}, nil
+		return map[string]any{"version": "kmp-torrentd " + version, "enabledFeatures": []string{"BitTorrent", "DHT", "IPv6", "PEX", "uTP", "BEP55", "AddPeers"}}, nil
 	case "kmp.getNetworkStats":
 		return d.networkStats(), nil
+	case "kmp.addPeers":
+		gid, err := stringAt(p, 0)
+		if err != nil {
+			return nil, err
+		}
+		var addrs []string
+		if len(p) < 2 || json.Unmarshal(p[1], &addrs) != nil {
+			return nil, errors.New("lista de peers inválida")
+		}
+		return d.addPeers(gid, addrs)
 	case "aria2.shutdown":
 		go d.shutdown()
 		return "OK", nil
@@ -481,6 +491,28 @@ func (d *daemon) peers(gid string) ([]map[string]any, error) {
 			"port": port, "source": string(p.Discovery)})
 	}
 	return ret, nil
+}
+
+// Peers alcançáveis já conhecidos (como os nós públicos do catálogo) entram direto no
+// torrent, sem esperar o próximo anúncio ao tracker, que pode demorar uma hora.
+func (d *daemon) addPeers(gid string, addrs []string) (int, error) {
+	x := d.get(gid)
+	if x == nil {
+		return 0, errors.New("GID não encontrado")
+	}
+	if len(addrs) > 32 {
+		return 0, errors.New("peers demais")
+	}
+	peers := make([]torrent.PeerInfo, 0, len(addrs))
+	for _, addr := range addrs {
+		host, port, err := net.SplitHostPort(addr)
+		number, portErr := strconv.Atoi(port)
+		if err != nil || net.ParseIP(host) == nil || portErr != nil || number < 1 || number > 65535 {
+			return 0, fmt.Errorf("peer inválido: %q", addr)
+		}
+		peers = append(peers, torrent.PeerInfo{Addr: torrent.StringAddr(addr), Source: torrent.PeerSourceDirect, Trusted: true})
+	}
+	return x.Torrent.AddPeers(peers), nil
 }
 
 func (d *daemon) globalStat() map[string]string {

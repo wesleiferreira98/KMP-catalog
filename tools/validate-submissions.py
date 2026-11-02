@@ -108,7 +108,7 @@ def rpc(endpoint, secret, method, params=None):
     if body.get("error"): raise ValueError(f"kmp-torrentd: {body['error'].get('message', 'erro RPC')}")
     return body.get("result")
 
-def fetch_with_kmp_torrentd(executable, torrent_path, destination, timeout):
+def fetch_with_kmp_torrentd(executable, torrent_path, destination, timeout, stall_timeout, seed_nodes):
     rpc_port, listen_port = available_port(), available_port()
     while listen_port == rpc_port: listen_port = available_port()
     secret = secrets.token_hex(24)
@@ -132,17 +132,30 @@ def fetch_with_kmp_torrentd(executable, torrent_path, destination, timeout):
         gid = rpc(endpoint, secret, "aria2.addTorrent", [encoded, [], {"dir": str(destination)}])
         name, length = torrent_package_metadata(torrent_path)
         package = destination / name
-        last_report = 0
+        last_report = last_peers = -60
+        best, progressed = -1, time.monotonic()
         while True:
             status = rpc(endpoint, secret, "aria2.tellStatus", [gid])
             total, completed = int(status["totalLength"]), int(status["completedLength"])
             # O anacrolix grava em "<nome>.part" e só renomeia depois de concluir a última peça.
             if total > 0 and completed >= total and package.is_file() and package.stat().st_size == length: return
-            elapsed = time.monotonic() - started
-            if elapsed - last_report >= 15:
+            now = time.monotonic()
+            elapsed = now - started
+            if completed > best: best, progressed = completed, now
+            # O anacrolix descarta peers que falharam; os nós públicos voltam à lista
+            # enquanto o publicador ainda envia as peças a eles.
+            if seed_nodes and elapsed - last_peers >= 60:
+                try: rpc(endpoint, secret, "kmp.addPeers", [gid, seed_nodes])
+                except ValueError as error: print(f"nós públicos não adicionados: {error}", flush=True)
+                last_peers = elapsed
+            if elapsed - last_report >= 60:
                 network = rpc(endpoint, secret, "kmp.getNetworkStats")
-                print(f"kmp-torrentd: {completed}/{total} bytes; {status['connections']} conexões; rede={network}", flush=True)
+                torrent = next((item for item in network.get("torrents", []) if item.get("gid") == gid), {})
+                print(f"kmp-torrentd: {completed >> 20}/{total >> 20} MiB; {status['connections']} conexões; "
+                    f"peers conhecidos={torrent.get('knownPeers')} origens={torrent.get('peerSources')}", flush=True)
                 last_report = elapsed
+            if now - progressed >= stall_timeout:
+                raise ValueError(f"download parado: nenhum byte novo em {stall_timeout}s ({completed >> 20}/{total >> 20} MiB)")
             if elapsed >= timeout: raise ValueError(f"tempo esgotado ao obter pacote pelo swarm ({timeout}s)")
             if process.poll() is not None: raise ValueError(f"kmp-torrentd encerrou com código {process.returncode}")
             time.sleep(2)
@@ -152,12 +165,16 @@ def fetch_with_kmp_torrentd(executable, torrent_path, destination, timeout):
         try: process.wait(timeout=10)
         except subprocess.TimeoutExpired: process.kill()
 
-def fetch_package(torrent_path, destination, timeout):
+def seed_nodes():
+    path = Path(__file__).resolve().parents[1] / "seed-nodes.json"
+    return json.loads(path.read_text()) if path.is_file() else []
+
+def fetch_package(torrent_path, destination, timeout, stall_timeout=1200):
     destination.mkdir(parents=True, exist_ok=True)
     torrent_path = prepare_torrent(torrent_path, destination)
     kmp_torrentd = os.environ.get("KMP_TORRENTD")
     if kmp_torrentd:
-        fetch_with_kmp_torrentd(kmp_torrentd, torrent_path, destination, timeout)
+        fetch_with_kmp_torrentd(kmp_torrentd, torrent_path, destination, timeout, stall_timeout, seed_nodes())
         return
     command = ["aria2c", "--seed-time=0", "--check-integrity=true", "--file-allocation=none",
         f"--bt-tracker={','.join(FALLBACK_TRACKERS)}",
@@ -171,7 +188,7 @@ def fetch_package(torrent_path, destination, timeout):
     except subprocess.CalledProcessError as error:
         raise ValueError(f"download BitTorrent falhou com código {error.returncode}") from error
 
-def validate(submission_path, fetch_missing=False, download_timeout=600):
+def validate(submission_path, fetch_missing=False, download_timeout=600, stall_timeout=1200):
     base = submission_path.parent.resolve()
     document = json.loads(submission_path.read_text())
     torrents = list((base / "torrents").glob("*.torrent"))
@@ -193,7 +210,7 @@ def validate(submission_path, fetch_missing=False, download_timeout=600):
             if not fetch_missing: raise ValueError("pacote ausente; use --fetch-missing para obtê-lo pelo swarm")
             temporary = tempfile.TemporaryDirectory(prefix="kmp-submission-")
             fetch_root = Path(temporary.name)
-            fetch_package(matches[0], fetch_root, download_timeout)
+            fetch_package(matches[0], fetch_root, download_timeout, stall_timeout)
             package_path = fetch_root / package_name
             if not package_path.is_file(): raise ValueError("torrent concluído sem produzir o ZIP esperado")
         digest = hashlib.sha256()
@@ -209,9 +226,12 @@ def validate(submission_path, fetch_missing=False, download_timeout=600):
 parser = argparse.ArgumentParser()
 parser.add_argument("--fetch-missing", action="store_true")
 parser.add_argument("--download-timeout", type=int, default=600)
+parser.add_argument("--stall-timeout", type=int, default=1200,
+    help="falha se o download ficar este tempo sem receber bytes novos")
 parser.add_argument("submissions", nargs="+")
 args = parser.parse_args()
 for argument in args.submissions:
-    try: validate(Path(argument), fetch_missing=args.fetch_missing, download_timeout=args.download_timeout)
+    try: validate(Path(argument), fetch_missing=args.fetch_missing, download_timeout=args.download_timeout,
+        stall_timeout=args.stall_timeout)
     except (OSError, ValueError, KeyError, json.JSONDecodeError) as error:
         print(f"erro: {argument}: {error}", file=sys.stderr); raise SystemExit(1)

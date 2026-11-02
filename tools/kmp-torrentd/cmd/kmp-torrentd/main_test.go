@@ -214,3 +214,75 @@ func TestTransferBetweenTwoDaemons(t *testing.T) {
 		t.Fatal("conteúdo transferido difere do original")
 	}
 }
+
+func TestAddPeersConnectsAnExistingTorrent(t *testing.T) {
+	root := t.TempDir()
+	seedDir, downloadDir := filepath.Join(root, "seed"), filepath.Join(root, "download")
+	if err := os.MkdirAll(seedDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	payload := bytes.Repeat([]byte("KMP add peers\n"), 4096)
+	if err := os.WriteFile(filepath.Join(seedDir, "package.zip"), payload, 0644); err != nil {
+		t.Fatal(err)
+	}
+	info := metainfo.Info{PieceLength: 16 * 1024}
+	if err := info.BuildFromFilePath(filepath.Join(seedDir, "package.zip")); err != nil {
+		t.Fatal(err)
+	}
+	infoBytes, err := bencode.Marshal(info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var torrentBytes bytes.Buffer
+	if err := (&metainfo.MetaInfo{InfoBytes: infoBytes}).Write(&torrentBytes); err != nil {
+		t.Fatal(err)
+	}
+	newDaemon := func(port int, dir string) *daemon {
+		cfg := torrent.NewDefaultClientConfig()
+		cfg.DataDir, cfg.ListenPort, cfg.Seed = dir, port, true
+		cfg.DefaultStorage = storage.NewFileOpts(storage.NewFileClientOpts{ClientBaseDir: dir})
+		cfg.NoDHT, cfg.DisableTrackers, cfg.NoDefaultPortForwarding = true, true, true
+		client, err := torrent.NewClient(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { client.Close() })
+		stateDir := filepath.Join(root, filepath.Base(dir)+"-state")
+		if err := os.MkdirAll(stateDir, 0700); err != nil {
+			t.Fatal(err)
+		}
+		return &daemon{client: client, stateDir: stateDir, baseDir: dir, items: map[string]*transfer{}, byHash: map[string]string{}}
+	}
+	seed, leecher := newDaemon(49133, seedDir), newDaemon(49134, downloadDir)
+	if _, err := seed.addMetainfo(torrentBytes.Bytes(), map[string]string{"dir": seedDir}, false); err != nil {
+		t.Fatal(err)
+	}
+	gid, err := leecher.addMetainfo(torrentBytes.Bytes(), map[string]string{"dir": downloadDir}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	invalid, _ := json.Marshal([]string{"não-é-endereço"})
+	if _, err := leecher.call("kmp.addPeers", []json.RawMessage{json.RawMessage(`"` + gid + `"`), invalid}); err == nil {
+		t.Fatal("peer inválido aceito")
+	}
+	peers, _ := json.Marshal([]string{"127.0.0.1:49133"})
+	if _, err := leecher.call("kmp.addPeers", []json.RawMessage{json.RawMessage(`"` + gid + `"`), peers}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	for {
+		status, err := leecher.status(gid)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if status["status"] == "complete" {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("o peer adicionado não entregou o torrent: %#v", status)
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
