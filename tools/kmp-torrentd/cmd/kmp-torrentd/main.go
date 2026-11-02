@@ -86,7 +86,7 @@ type daemon struct {
 
 func main() {
 	var rpcAddr, secret, stateDir, dataDir, uploadLimit, downloadLimit string
-	var listenPort int
+	var listenPort, connsPerTorrent, halfOpenPerTorrent int
 	flag.StringVar(&rpcAddr, "rpc-listen", "127.0.0.1:26801", "endereço local da API JSON-RPC")
 	flag.StringVar(&secret, "rpc-secret", "", "segredo da API JSON-RPC")
 	flag.StringVar(&stateDir, "state-dir", "./state", "diretório de estado")
@@ -94,6 +94,11 @@ func main() {
 	flag.IntVar(&listenPort, "listen-port", 6881, "porta TCP/UDP do BitTorrent")
 	flag.StringVar(&uploadLimit, "upload-limit", "100K", "limite global de upload")
 	flag.StringVar(&downloadLimit, "download-limit", "0", "limite global de download")
+	// Handheld kernels and Wi-Fi drivers degrade sharply with dozens of parallel
+	// dials, so the defaults stay small. A public node raises them: it can only
+	// rendezvous (BEP 55) peers that are connected to it at the same time.
+	flag.IntVar(&connsPerTorrent, "max-conns-per-torrent", 12, "conexões estabelecidas por torrent")
+	flag.IntVar(&halfOpenPerTorrent, "half-open-per-torrent", 4, "tentativas de conexão simultâneas por torrent")
 	flag.Parse()
 	if secret == "" {
 		log.Fatal("--rpc-secret é obrigatório")
@@ -117,10 +122,8 @@ func main() {
 	cfg.NoDHT = false
 	cfg.NoDefaultPortForwarding = false
 	cfg.PeriodicallyAnnounceTorrentsToDht = true
-	// Handheld kernels and Wi-Fi drivers degrade sharply with dozens of parallel
-	// dials. Keep discovery enabled while bounding active connection pressure.
-	cfg.EstablishedConnsPerTorrent = 12
-	cfg.HalfOpenConnsPerTorrent = 4
+	cfg.EstablishedConnsPerTorrent = connsPerTorrent
+	cfg.HalfOpenConnsPerTorrent = halfOpenPerTorrent
 	cfg.ExtendedHandshakeClientVersion = "KMP torrentd/" + version
 	cfg.DefaultStorage = storage.NewFileOpts(storage.NewFileClientOpts{ClientBaseDir: dataDir})
 	if n, err := parseRate(uploadLimit); err == nil && n > 0 {
